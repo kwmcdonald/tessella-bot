@@ -1,0 +1,25 @@
+name: Keep scheduled runs alive
+
+# GitHub switches off scheduled workflows in a repository with no activity for 60 days.
+# The tournament runs past that, so this makes a tiny commit twice a month.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 1,15 * *"
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record a heartbeat
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .keepalive
+          git config user.name "keepalive-bot"
+          git config user.email "keepalive-bot@users.noreply.github.com"
+          git add .keepalive
+          git commit -m "Heartbeat: keep scheduled workflows active" || echo "Nothing to commit"
+          git push

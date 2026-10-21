@@ -1,0 +1,43 @@
+name: Test Bot
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  test_job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+      - name: Offline unit tests (no keys needed)
+        run: poetry run pip install pytest && poetry run python -m pytest -q test_ourbot.py
+      - name: Live smoke test on Metaculus's bot-testing area
+        run: poetry run python ourbot.py --mode test_questions
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ASKNEWS_CLIENT_ID: ${{ secrets.ASKNEWS_CLIENT_ID }}
+          ASKNEWS_SECRET: ${{ secrets.ASKNEWS_SECRET }}
+          ASKNEWS_API_KEY: ${{ secrets.ASKNEWS_API_KEY }}
+          # Optional overrides, set under Settings -> Secrets and variables -> Actions -> Variables
+          FORECASTER_MODELS: ${{ vars.FORECASTER_MODELS }}
+          BACKUP_MODELS: ${{ vars.BACKUP_MODELS }}
+          REASONING_EFFORT: ${{ vars.REASONING_EFFORT }}
+          INCLUDE_MINIBENCH: ${{ vars.INCLUDE_MINIBENCH }}
+          SEARCH_MODELS: ${{ vars.SEARCH_MODELS }}
+          PARSER_MODEL: ${{ vars.PARSER_MODEL }}
