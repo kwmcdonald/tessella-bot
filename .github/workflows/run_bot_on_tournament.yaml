@@ -16,21 +16,32 @@ jobs:
   forecast_job:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # Until both keys are added, every run skips quietly instead of failing and emailing you.
+      HAS_KEYS: ${{ secrets.METACULUS_TOKEN != '' && secrets.OPENROUTER_API_KEY != '' }}
     steps:
+      - name: Keys not added yet, skipping
+        if: env.HAS_KEYS != 'true'
+        run: echo "::notice::METACULUS_TOKEN and OPENROUTER_API_KEY are not both set yet. Skipping this run."
       - name: Check out repository
+        if: env.HAS_KEYS == 'true'
         uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        if: env.HAS_KEYS == 'true'
         with:
           python-version: "3.11"
       - name: Install poetry
+        if: env.HAS_KEYS == 'true'
         uses: snok/install-poetry@v1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
           installer-parallel: true
       - name: Install dependencies
+        if: env.HAS_KEYS == 'true'
         run: poetry install --no-interaction --no-root
       - name: Run bot (exits with an error, and GitHub emails you, only if a question is about to close unanswered)
+        if: env.HAS_KEYS == 'true'
         run: poetry run python ourbot.py --mode tournament
         env:
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
