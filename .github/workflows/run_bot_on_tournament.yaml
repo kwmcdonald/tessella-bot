@@ -56,3 +56,5 @@ jobs:
           INCLUDE_MINIBENCH: ${{ vars.INCLUDE_MINIBENCH }}
           SEARCH_MODELS: ${{ vars.SEARCH_MODELS }}
           PARSER_MODEL: ${{ vars.PARSER_MODEL }}
+          INDEPENDENT_RESEARCH: ${{ vars.INDEPENDENT_RESEARCH }}
+          SLOT_SEARCH_MODELS: ${{ vars.SLOT_SEARCH_MODELS }}

@@ -3,7 +3,9 @@
 The bot is Metaculus's official Fall 2026 template with these additions (details in `ourbot.py`):
 - a panel of three frontier models (OpenAI GPT-5.6 Sol, Anthropic Claude Opus 5.5, Google
   Gemini 4 Argon), submitting the median, the approach of the top open-source bot;
-- research from AskNews news plus native web search, including prediction-market prices;
+- independent research per model: a shared AskNews news digest, plus each model's own web
+  search through its own lab's search tool, so the models don't all inherit one briefing's
+  blind spots (the main failure mode the top open-source bot found);
 - fallbacks so one failure never costs a question, and a stronger model for reading answers;
 - honest (not extremized) forecasts, with a per-call cost ceiling;
 - an email alarm if a question is about to close unanswered.
@@ -81,7 +83,9 @@ questions are only open for 3 hours. So an outside service starts the bot every 
 |---|---|---|
 | `FORECASTER_MODELS` | GPT-5.6 Sol, Claude Opus 5.5, Gemini 4 Argon | The panel (OpenRouter names, comma-separated) |
 | `BACKUP_MODELS` | GPT-5.6 Terra, Claude Sonnet 5.5, Gemini 3.8 Flash | Tried in order if a panel model fails |
-| `SEARCH_MODELS` | GPT-5.6 Terra and Gemini 3.8 Flash with `:online` | Web search, tried in order |
+| `INDEPENDENT_RESEARCH` | `true` | Each model does its own web search; `false` = one shared briefing |
+| `SLOT_SEARCH_MODELS` | GPT-5.6 Terra, Claude Sonnet 5.5, Gemini 3.8 Flash, all `:online` | Each panel member's own search, in panel order |
+| `SEARCH_MODELS` | GPT-5.6 Terra and Gemini 3.8 Flash with `:online` | Shared web search, used only when `INDEPENDENT_RESEARCH` is `false` |
 | `PARSER_MODEL` | GPT-5.6 Terra | Reads each written forecast into a number |
 | `REASONING_EFFORT` | `medium` | `low` is cheaper, `high` costs more |
 | `INCLUDE_MINIBENCH` | `true` | MiniBench's $1,000 two-week rounds |

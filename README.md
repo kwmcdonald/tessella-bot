@@ -4,7 +4,8 @@ A forecasting bot for the Metaculus FutureEval bot tournament, built on Metaculu
 [Fall 2026 template](https://github.com/Metaculus/metac-bot-template) (MIT-style open source).
 
 - **`ourbot.py`**: the bot that actually runs. A three-model panel (OpenAI, Anthropic, Google)
-  with median aggregation, AskNews plus web-search research, fallbacks, and a deadline alarm.
+  with median aggregation, independent research per model (shared AskNews digest plus each
+  model's own web search), fallbacks, and a deadline alarm.
 - **`SETUP.md`**: one-time setup steps.
 - **`test_ourbot.py`**: offline tests (no keys needed): `python -m pytest -q test_ourbot.py`.
 

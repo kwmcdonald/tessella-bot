@@ -107,31 +107,66 @@ def test_total_outage_reports_error_instead_of_crashing_run():
     assert all(isinstance(r, BaseException) for r in reports)   # surfaced, run continues
 
 
-def test_research_falls_back_when_search_fails():
-    FAILING.add(ourbot.SEARCH_MODELS[0])
+def _spy(monkeypatch):
+    """Record (model, prompt) for every call while still answering like fake_invoke."""
+    seen = []
+    async def spy_invoke(self, prompt, *a, **k):
+        seen.append((self.model, str(prompt)))
+        return await fake_invoke(self, prompt)
+    monkeypatch.setattr(GeneralLlm, "invoke", spy_invoke)
+    return seen
+
+
+def test_each_panel_member_gets_its_own_search():
     bot = ourbot.build_bot(publish=False)
-    research = asyncio.run(bot.run_research(make_question()))
-    assert f"Research notes from {ourbot.SEARCH_MODELS[1]}" in research
+    [report] = run(bot, [make_question()])
+    assert not isinstance(report, BaseException), report
+    used = sorted((slot, model) for _, slot, model in bot.research_log)
+    assert used == [(i, ourbot.SLOT_SEARCH_MODELS[i]) for i in range(3)]
 
 
-def test_research_asks_for_markets_and_combines_asknews(monkeypatch):
+def test_members_see_different_evidence(monkeypatch):
+    seen = _spy(monkeypatch)
+    bot = ourbot.build_bot(publish=False)
+    run(bot, [make_question()])
+    for forecaster, searcher in zip(ourbot.FORECASTER_MODELS, ourbot.SLOT_SEARCH_MODELS):
+        prompts = [p for m, p in seen if m == forecaster]
+        assert len(prompts) == 1
+        assert f"Research notes from {searcher}" in prompts[0]                     # its own search
+        others = [s for s in ourbot.SLOT_SEARCH_MODELS if s != searcher]
+        assert not any(f"Research notes from {o}" in prompts[0] for o in others)  # not the others'
+
+
+def test_search_prompts_ask_for_markets_and_latest_figures(monkeypatch):
+    seen = _spy(monkeypatch)
+    run(ourbot.build_bot(publish=False), [make_question()])
+    searches = [p for m, p in seen if m in ourbot.SLOT_SEARCH_MODELS]
+    assert len(searches) == 3 and all("Polymarket" in p and "most recent value" in p for p in searches)
+
+
+def test_own_search_falls_back_to_another_members_search():
+    FAILING.add(ourbot.SLOT_SEARCH_MODELS[1])
+    bot = ourbot.build_bot(publish=False)
+    [report] = run(bot, [make_question()])
+    assert not isinstance(report, BaseException), report
+    slot1 = [model for _, slot, model in bot.research_log if slot == 1]
+    assert slot1 and slot1[0] != ourbot.SLOT_SEARCH_MODELS[1]
+
+
+def test_asknews_digest_is_shared_with_every_member(monkeypatch):
     monkeypatch.setenv("ASKNEWS_API_KEY", "test")
     async def fake_news(self, preset, query):
         return "AskNews: three relevant articles."
     monkeypatch.setattr(forecasting_tools.AskNewsSearcher, "call_preconfigured_version", fake_news)
-    seen_prompts = []
-    async def spy_invoke(self, prompt, *a, **k):
-        seen_prompts.append(prompt)
-        return await fake_invoke(self, prompt)
-    monkeypatch.setattr(GeneralLlm, "invoke", spy_invoke)
-    bot = ourbot.build_bot(publish=False)
-    research = asyncio.run(bot.run_research(make_question()))
-    assert "AskNews: three relevant articles." in research and "Research notes from" in research
-    assert any("Polymarket" in p for p in seen_prompts)
+    seen = _spy(monkeypatch)
+    run(ourbot.build_bot(publish=False), [make_question()])
+    for forecaster in ourbot.FORECASTER_MODELS:
+        [prompt] = [p for m, p in seen if m == forecaster]
+        assert "AskNews: three relevant articles." in prompt
 
 
 def test_research_never_blocks_forecast():
-    FAILING.update(ourbot.SEARCH_MODELS)
+    FAILING.update(ourbot.SLOT_SEARCH_MODELS)
     bot = ourbot.build_bot(publish=False)
     [report] = run(bot, [make_question()])
     assert not isinstance(report, BaseException), report
@@ -174,6 +209,23 @@ def test_empty_github_variables_fall_back_to_defaults(monkeypatch):
 
 
 def test_only_donated_credit_providers_by_default():
-    for m in ourbot.FORECASTER_MODELS + ourbot.BACKUP_MODELS + ourbot.SEARCH_MODELS + [ourbot.PARSER_MODEL]:
+    for m in (ourbot.FORECASTER_MODELS + ourbot.BACKUP_MODELS + ourbot.SEARCH_MODELS
+              + ourbot.SLOT_SEARCH_MODELS + [ourbot.PARSER_MODEL]):
         provider = m.split("/")[1]
         assert provider in {"openai", "anthropic", "google"}, m
+
+
+def test_shared_briefing_mode_still_works(monkeypatch):
+    import importlib
+    monkeypatch.setenv("INDEPENDENT_RESEARCH", "false")
+    mod = importlib.reload(ourbot)
+    try:
+        monkeypatch.setattr(main, "structure_output", fake_structure_output)
+        bot = mod.build_bot(publish=False)
+        research = asyncio.run(bot.run_research(make_question()))
+        assert f"Research notes from {mod.SEARCH_MODELS[0]}" in research
+        [report] = asyncio.run(bot.forecast_questions([make_question()], return_exceptions=True))
+        assert not isinstance(report, BaseException) and not bot.research_log
+    finally:
+        monkeypatch.delenv("INDEPENDENT_RESEARCH")
+        importlib.reload(ourbot)

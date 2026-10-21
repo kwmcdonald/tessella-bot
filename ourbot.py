@@ -6,9 +6,12 @@ Design follows the FutureEval resources page and the Spring 2026 bot-maker advic
    (the only providers the donated credits cover), instead of the template's default GPT-4o.
    Each question gets one forecast per model and the median is submitted, as the top
    open-source bot does. Forecasting prompts are the template's own, unchanged.
-2. Better research, the lever bot-makers rated highest: AskNews news (free tier) plus
-   native web search, with an instruction to report prediction-market prices (allowed by
-   the rules) and the latest value of any number the question depends on.
+2. Independent research per panel member (our exploratory twist). The top open-source bot
+   found its worst misses came when all models agreed on one shared briefing. So only the
+   AskNews digest is shared; each model also gets its OWN web search, run through its own
+   lab's native search, so the members' evidence, and hopefully their errors, differ.
+   Searches ask for prediction-market prices (allowed by the rules) and the latest value of
+   any number the question depends on. INDEPENDENT_RESEARCH=false restores one shared briefing.
 3. Fallbacks everywhere, because a skipped question scores zero:
      - if a model call fails, the same forecast is retried on backup models;
      - if research fails, we fall back to other search models, then to no research;
@@ -94,6 +97,14 @@ SEARCH_MODELS = _env_list(
 )
 SEARCH_MODEL = SEARCH_MODELS[0]
 MAX_OUTPUT_TOKENS = int(_env("MAX_OUTPUT_TOKENS", "12000"))  # per-call cost ceiling
+# Independent research: one search model per panel member, in panel order (same lab as the forecaster).
+INDEPENDENT_RESEARCH = _env("INDEPENDENT_RESEARCH", "true").lower() not in ("false", "0", "no")
+SLOT_SEARCH_MODELS = _env_list(
+    "SLOT_SEARCH_MODELS",
+    "openrouter/openai/gpt-5.6-terra:online,"
+    "openrouter/anthropic/claude-sonnet-5.5:online,"
+    "openrouter/google/gemini-3.8-flash:online",
+)
 REASONING_EFFORT = _env("REASONING_EFFORT", "medium")
 URGENT_MINUTES = int(_env("URGENT_MINUTES", "90"))
 # MiniBench rounds are cheap lottery tickets; switch off with INCLUDE_MINIBENCH=false to save credits.
@@ -164,17 +175,36 @@ class OurBot(FallTemplateBot2026):
         })
         super().__init__(*args, **kwargs)
         self.panels = [FallbackLlm([m] + [b for b in BACKUP_MODELS if b != m]) for m in FORECASTER_MODELS]
+        self.research_log: list[tuple[str, int, str]] = []  # (question, panel slot, search model used)
 
     # -- model panel ---------------------------------------------------------------------
     async def _make_prediction(self, question: MetaculusQuestion, research: str):
         key = str(question.id_of_question or question.page_url)
         slot = self._slot_counters.get(key, 0)
         self._slot_counters[key] = slot + 1
-        token = _panel_slot.set(slot % len(self.panels))
+        slot %= len(self.panels)
+        token = _panel_slot.set(slot)
         try:
+            if INDEPENDENT_RESEARCH:
+                research = research + "\n\n" + await self._own_search(question, slot)
             return await super()._make_prediction(question, research)
         finally:
             _panel_slot.reset(token)
+
+    async def _own_search(self, question: MetaculusQuestion, slot: int) -> str:
+        """This panel member's private web search. Falls back to the other members' search
+        models only if its own fails (then evidence is less independent, but never missing)."""
+        own = SLOT_SEARCH_MODELS[slot % len(SLOT_SEARCH_MODELS)]
+        chain = [own] + [m for m in SLOT_SEARCH_MODELS if m != own]
+        searcher = FallbackLlm(chain)
+        prompt = self._get_research_prompt(question, own) + RESEARCH_ADDENDUM
+        try:
+            web = await searcher.invoke(prompt)
+            self.research_log.append((question.page_url, slot, searcher.used[-1]))
+            return "## Your own web search and prediction markets\n" + web
+        except Exception as error:  # noqa: BLE001
+            logger.warning(f"Own search failed for slot {slot} on {question.page_url}: {error}")
+            return "## Your own web search\nNo web search results could be retrieved."
 
     def get_llm(self, purpose: str = "default", guarantee_type=None):
         slot = _panel_slot.get()
@@ -194,12 +224,15 @@ class OurBot(FallTemplateBot2026):
                         sections.append("## Recent news (AskNews)\n" + news)
                 except Exception as error:  # noqa: BLE001
                     logger.warning(f"AskNews failed for {question.page_url}: {error}")
-            prompt = self._get_research_prompt(question, SEARCH_MODEL) + RESEARCH_ADDENDUM
-            try:
-                web = await FallbackLlm(SEARCH_MODELS).invoke(prompt)
-                sections.append("## Web search and prediction markets\n" + web)
-            except Exception as error:  # noqa: BLE001
-                logger.warning(f"Web search failed for {question.page_url}: {error}")
+            if not INDEPENDENT_RESEARCH:
+                prompt = self._get_research_prompt(question, SEARCH_MODEL) + RESEARCH_ADDENDUM
+                try:
+                    web = await FallbackLlm(SEARCH_MODELS).invoke(prompt)
+                    sections.append("## Web search and prediction markets\n" + web)
+                except Exception as error:  # noqa: BLE001
+                    logger.warning(f"Web search failed for {question.page_url}: {error}")
+            elif not sections:
+                return "## Shared news\nNo shared news digest for this question; see your own search below."
             if sections:
                 logger.info(f"Research for {question.page_url}: {len(sections)} source(s)")
                 return "\n\n".join(sections)
